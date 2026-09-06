@@ -26,6 +26,16 @@ ls -d /sys/bus/acpi/devices/OVTI08F4:00 /sys/bus/acpi/devices/INTC10E1:00
 lspci -nn -s 00:05.0                  # [8086:b05d]
 ```
 
+**How much of that has to match.** Two things are load-bearing: the Synaptics
+bridge, because the drivers exist to reach through it, and the OV08X40 sensor,
+because the tuning file, the gain script and the relay's input size are all
+written for it. A different sensor means rewriting those three. Everything
+else is softer: another IPU7 stepping will probably work, and the fix pack's
+`ipu-bridge.c` carries the same sensor quirk for the XPS 16 (DA16260), so that
+machine is likely to follow this guide unchanged — untested. The install script
+enforces exactly the two hard conditions and warns about the rest. It is
+Arch-only; the guide's reasoning is not.
+
 The symptom, before anything is installed:
 
 ```
@@ -47,6 +57,24 @@ Why: the sensors are not on a native I2C controller. They sit behind the
 Synaptics bridge, which tunnels I2C over a USB bulk interface. Until a driver
 claims that bridge, the ACPI dependency chain is unsatisfied, no I2C client is
 created, and the IPU has nothing to talk to.
+
+## The short way
+
+The steps below, in order, as a script:
+
+```bash
+./install.sh              # asks for sudo where it needs it; ends by asking for a reboot
+./install.sh --verify     # after the reboot
+```
+
+`./uninstall.sh` puts everything back, kernel drivers included;
+`--keep-kernel` leaves the drivers, `--purge` also removes the packages step 1
+and step 8 installed. Both scripts take `--dry-run` and are safe to run
+twice. They explain nothing; the rest of this page does.
+
+Tested as a round trip on this machine: uninstall, reboot, install (52 s),
+reboot, verify. Audio stayed up throughout, since the WirePlumber drop-in goes
+in before the reboot that would otherwise take it down.
 
 ---
 
@@ -72,10 +100,12 @@ created, and the IPU has nothing to talk to.
 ## 1. Packages
 
 ```bash
-sudo pacman -S --needed dkms libcamera libcamera-tools pipewire-libcamera gst-plugin-libcamera
+sudo pacman -Syu --needed dkms libcamera libcamera-tools pipewire-libcamera gst-plugin-libcamera
 ```
 
-`libcamera-ipa` comes in as a dependency; six packages in total, about 6 MiB.
+`-Syu`, not `-S`: with a package database more than a few days old every
+mirror answers 404 for these. `libcamera-ipa` comes in as a dependency; six
+packages in total, about 6 MiB.
 
 | package | why |
 |---|---|
@@ -300,15 +330,17 @@ feature should take default-node assignment with it, I have not established.
 
 **Fix.** A user drop-in — *not* under `/etc`, and *not* with sudo:
 
-```bash
-mkdir -p ~/.config/wireplumber/wireplumber.conf.d
-cat > ~/.config/wireplumber/wireplumber.conf.d/99-video-capture-optional.conf <<'EOF'
+```
 wireplumber.profiles = {
   main = {
     hardware.video-capture = optional
   }
 }
-EOF
+```
+
+```bash
+install -Dm644 home/.config/wireplumber/wireplumber.conf.d/99-video-capture-optional.conf \
+    ~/.config/wireplumber/wireplumber.conf.d/99-video-capture-optional.conf
 systemctl --user restart wireplumber
 ```
 
@@ -367,7 +399,19 @@ options v4l2loopback devices=1 video_nr=33 card_label="IPU7 Webcam" exclusive_ca
 ```
 
 and `/etc/modules-load.d/v4l2loopback.conf` containing one line, `v4l2loopback`,
-so it comes up at boot.
+so it comes up at boot. That second file only acts at boot, so load it by hand
+this once:
+
+```bash
+sudo install -Dm644 etc/modprobe.d/v4l2loopback.conf /etc/modprobe.d/v4l2loopback.conf
+sudo install -Dm644 etc/modules-load.d/v4l2loopback.conf /etc/modules-load.d/v4l2loopback.conf
+sudo modprobe v4l2loopback
+cat /sys/devices/virtual/video4linux/video33/name
+```
+
+```
+IPU7 Webcam
+```
 
 Every option here is load-bearing:
 
@@ -431,6 +475,8 @@ granting you access anyway; `TAG-="uaccess"` drops that grant. Afterwards
 `getfacl` still lists your entry, but with `#effective:---` under `mask::---`:
 
 ```bash
+$ sudo install -Dm644 etc/udev/rules.d/99-ipu7-hide-raw-nodes.rules \
+      /etc/udev/rules.d/99-ipu7-hide-raw-nodes.rules
 $ sudo udevadm control --reload-rules
 $ sudo udevadm trigger --subsystem-match=video4linux
 $ ls -l /dev/video0
