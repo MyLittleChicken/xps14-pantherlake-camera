@@ -1,0 +1,24 @@
+#!/bin/bash
+# Pin the OV08X40 analogue gain.
+#
+# The tuning file at /etc/libcamera/ipa/simple/ov08x40.yaml removes the Agc
+# algorithm, so nothing writes exposure or gain any more. Whatever is set here
+# is what the sensor uses; it survives stream start and stop, but not a reboot,
+# which is why the relay unit re-applies it with ExecStartPost.
+#
+# Exposure is not settable: libcamera re-applies its own value when the stream
+# starts even with Agc gone. Gain is the only lever, and it is the one that
+# matters for noise.
+#
+# Range 128-1984, where 128 is 1.0x. Lower is darker and cleaner.
+GAIN=${1:-600}
+
+for n in /sys/class/video4linux/v4l-subdev*/name; do
+    # Subdev numbers shuffle between boots -- resolve by entity name, never number.
+    if grep -q '^ov08x40' "$n" 2>/dev/null; then
+        exec v4l2-ctl -d "/dev/$(basename "$(dirname "$n")")" --set-ctrl=analogue_gain="$GAIN"
+    fi
+done
+
+echo "ipu7-set-gain: no ov08x40 subdev found" >&2
+exit 1

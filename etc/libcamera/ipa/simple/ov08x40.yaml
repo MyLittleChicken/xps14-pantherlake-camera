@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: CC0-1.0
+%YAML 1.1
+---
+# OV08X40 on Intel IPU7, for libcamera's "simple" pipeline handler and its
+# software ISP. Install to /etc/libcamera/ipa/simple/ov08x40.yaml -- libcamera
+# searches /etc/libcamera/ipa before /usr/share/libcamera/ipa, so no environment
+# variable is needed and the distribution's files stay untouched.
+#
+# Two deviations from the stock uncalibrated.yaml:
+#
+# 1. No Agc. The software AGC meters on a mean sample value with no highlight
+#    protection, so it reads a backlit frame as dark and drives exposure to its
+#    ceiling and analogue gain to maximum -- blowing out the background and
+#    amplifying noise. With Agc gone nothing writes exposure or gain, and a
+#    value set before the stream starts stays put. bin/ipu7-set-gain does that.
+#
+# 2. Ccm enabled. Stock leaves it commented out, which means an identity matrix:
+#    the sensor's raw filter response is treated as if it were already sRGB, and
+#    everything looks washed out.
+#
+#    The matrix below is not a calibration. It is a generic CMOS daylight shape
+#    -- rows sum to 1.0 so white stays white, and the off-diagonal terms undo
+#    roughly the colour crosstalk a sensor of this class has. It lands visibly
+#    closer than identity; hues are not guaranteed. A real matrix needs a
+#    colour chart.
+version: 1
+algorithms:
+  - BlackLevel:
+  - Awb:
+  - Ccm:
+      ccms:
+        - ct: 6500
+          ccm: [  1.55, -0.45, -0.10,
+                 -0.25,  1.50, -0.25,
+                  0.05, -0.45,  1.40 ]
+  - Adjust:
+...
