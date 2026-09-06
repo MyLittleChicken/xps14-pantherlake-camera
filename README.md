@@ -63,6 +63,8 @@ created, and the IPU has nothing to talk to.
 The steps below, in order, as a script:
 
 ```bash
+git clone https://github.com/MyLittleChicken/xps14-pantherlake-camera
+cd xps14-pantherlake-camera
 ./install.sh              # asks for sudo where it needs it; ends by asking for a reboot
 ./install.sh --verify     # after the reboot
 ```
