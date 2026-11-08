@@ -598,7 +598,7 @@ works out which `/dev/videoN` to write to.
 `etc/v4l2-relayd.d/ipu7.conf`:
 
 ```
-VIDEOSRC="libcamerasrc ! video/x-raw,width=3848,height=2176 ! queue max-size-buffers=3 ! videoconvert ! videobalance saturation=1.4 contrast=1.05 ! videoscale method=lanczos"
+VIDEOSRC="libcamerasrc camera-name=\\\"\\\\\\\\_SB_.LNK1\\\" ! video/x-raw,width=3848,height=2176 ! queue max-size-buffers=3 ! videoconvert ! videobalance saturation=1.4 contrast=1.05 ! videoscale method=lanczos"
 FORMAT=YUY2
 WIDTH=1920
 HEIGHT=1080
@@ -606,7 +606,30 @@ FRAMERATE=30/1
 CARD_LABEL="IPU7 Webcam"
 ```
 
-Two things about that `VIDEOSRC` are not stylistic.
+Three things about that `VIDEOSRC` are not stylistic.
+
+**It names the camera.** Without `camera-name`, `libcamerasrc` opens
+libcamera's first camera, and the first camera is not fixed. The two sensors
+bind in whichever order their probes finish, so on some boots `cam -l` lists
+the RGB sensor first and on others the IR sensor:
+
+```
+INFO Camera camera_manager.cpp:223 Adding camera '\_SB_.LNK0' for pipeline handler simple   <- hm1092, IR
+INFO Camera camera_manager.cpp:223 Adding camera '\_SB_.LNK1' for pipeline handler simple   <- ov08x40
+```
+
+When the IR sensor comes first the relay asks it for 3848x2176, which it cannot
+produce, and gives up. Nothing says so in the journal. You see libcamera start
+up once per second while an application waits, then nothing: the relay holds
+no device open, uses no CPU, and the application gets no frames. On the next
+boot the order may flip back and the camera works again, which makes it look
+random.
+
+The backslashes are for three parsers in a row. systemd unescapes the
+`EnvironmentFile`, `sh` unescapes the double-quoted `-i "${VIDEOSRC}"` in the
+unit, and `gst_parse_launch` unescapes the quoted property. Libcamera gets
+`\_SB_.LNK1`. If you need another camera, take its id from `cam -l` and keep
+the same escaping.
 
 **It must not end with a capsfilter.** Ending it
 `... ! videoscale ! video/x-raw,format=YUY2,width=1920,height=1080` looks
@@ -825,6 +848,7 @@ part of it — untested.
 | No camera in any application | sensors never bound | [step 3](#3-reboot-and-check-the-kernel-half) — check `Connected 2 cameras` first |
 | **Sound stopped after a reboot** | WirePlumber stalled with no video devices | [step 4](#4-your-sound-just-stopped--fix-that-first) |
 | Camera listed, picture permanently black | an application is holding a raw node | `fuser -v /dev/video0`; kill it, check the udev rule from [step 6](#6-keeping-applications-off-the-raw-nodes) |
+| Camera works on some boots and not others; relay idle, application gets no frames | relay opened the IR sensor | `camera-name` in `ipu7.conf`, [step 8](#8-the-relay) |
 | `v4l2-relayd@ipu7` fails instantly | `VIDEOSRC` ends with a capsfilter | [step 8](#8-the-relay) |
 | Black frames, `Unsupported DRM format BA10` in the journal | sandbox is hiding dma-buf | `override.conf`, [step 8](#8-the-relay) |
 | Under 1 fps | `v4l2sink` synchronising | [step 8](#8-the-relay) |
